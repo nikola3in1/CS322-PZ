@@ -1,0 +1,413 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <title>CS322-PZ-NikolaMitrovic2934&mdash; Private Chatroom</title>
+    <link rel="stylesheet" href="@Url.Content("~/Content/app.css")">
+</head>
+<body>
+    <nav class="navbar navbar-inverse">
+        <div class="container-fluid" style="margin-right:unset">
+            <div class="navbar-header">
+                <a class="navbar-brand" href="#">MetChat - @ViewBag.currentUser.name </a>
+            </div>
+            <ul class="nav navbar-nav navbar-right">
+                <li><a href="logout">Log Out</a></li>
+            </ul>
+        </div>
+    </nav>
+    <div class="container" style="margin-top:10vh">
+        <div class="row">
+            <div class="col-xs-12 col-md-3">
+                <aside class="main">
+                    <div class="row">
+                        <div class="col-xs-12" style="">
+                            <div class="panel panel-default users__bar">
+                                <div class="panel-heading users__heading">
+                                    Contacts (@ViewBag.allUsers.Count)
+                                </div>
+                                <div class="__no__chat__">
+                                    <p>Select a contact to chat with</p>
+                                </div>
+                                <div class="panel-body users__body">
+                                    <ul id="contacts" class="list-group">
+                                        @foreach (var user in @ViewBag.allUsers)
+                                        {
+                                            <a class="user__item contact-@user.id" href="#" data-contact-id="@user.id" data-contact-name="@user.name">
+                                                <li>
+                                                    <div class="avatar">
+                                                        <img src="@Url.Content("~/Content/no_avatar.png")">
+                                                    </div>
+                                                    <span>@user.name</span>
+                                                    <div class="status-bar"></div>
+                                                </li>
+                                            </a>
+                                        }
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </aside>
+
+
+            </div>
+            <div class="col-xs-12 col-md-8 chat__body">
+                <div class="row">
+                    <div class="col-xs-12" style=" height:55vh; width:100%; padding:inherit; display: flex; flex-direction: column;">
+                        <ul class="list-group chat__main themeEpic2"></ul>
+                    </div>
+                    <div class="chat__type__body" style="display: contents">
+                        <div class="chat__type">
+                            <textarea id="msg_box" style="resize: none; position: relative; display: inline-block; top: 6px;" maxlength="127" placeholder="Type your message"></textarea>
+                            <button class="btn btn-primary" id="sendMessage">Send</button>
+                            <div class="chat__typing" style="background: transparent;margin-left: 5px;">
+                                <span id="typerDisplay"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+            <div id="themes" class="col-xs-12 col-md-1 invisible">
+                <span class="defaultTheme"></span>
+                <span class="theme1"></span>
+                <span class="theme2"></span>
+                <span class="theme3"></span>
+                <span class="theme4"></span>
+                <span class="theme5"></span>
+                <span class="themeEpic"></span>
+                <span class="themeEpic2"></span>
+            </div>
+        </div>
+    </div>
+    <script src="@Url.Content("~/Content/app.js")"></script>
+    <script src="https://js.pusher.com/4.0/pusher.min.js"></script>
+    <script>
+        //////////// Variable Instantiation
+
+        const throttle = (callback, wait, context = this) => {
+          let timeout = null
+          let callbackArgs = null
+
+          const later = () => {
+            callback.apply(context, callbackArgs)
+            timeout = null
+          }
+
+          return function() {
+            if (!timeout) {
+              callbackArgs = arguments
+              timeout = setTimeout(later, wait)
+            }
+          }
+        }
+
+        //Pusher client side setup
+        const pusher = new Pusher('81b971a4e62af906bec5', {
+            cluster: 'eu',
+            forceTLS: true
+        });
+        pusher.connection.bind('connected', function() {
+            socketId = pusher.connection.socket_id;
+        });
+        let currentContact = null; // Holds contact currently being chatted with
+        let socketId = null;
+        let currentconversationChannel = null;//pusher.subscribe('chat-' + @ViewBag.currentUser.id );
+        let conversationChannelName = null;
+        let newMessageTpl =
+        `<div>
+            <div id="msg-{{id}}" class="row __chat__par__">
+                <div class="__chat__" style="overflow-wrap: break-word;margin-top: 15px;">
+                <p>{{body}}</p>
+                <p class="delivery-status">Delivered</p>
+                </div>
+            </div>
+            </div>`;
+    /////////////////////////////////
+        const chatAppChannel = pusher.subscribe('presence-chat');
+        chatAppChannel.bind("pusher:subscription_succeeded", (members) => {
+            members.each((member) => {
+                setContactStatus(member.info.id, 1);
+            });
+        });
+        chatAppChannel.bind("pusher:member_added", (member) => {
+            setContactStatus(member.info.id, 1);
+        });
+        chatAppChannel.bind("pusher:member_removed", (member) => {
+            setContactStatus(member.info.id, 0);
+        });
+        const setContactStatus = ( contact_id, status ) => {
+            var contactObj = $('#contacts .contact-' + contact_id);
+            if ( status ) {
+                contactObj.find('.status-bar').addClass('active');
+            } else {
+                contactObj.find('.status-bar').removeClass('active');
+            }
+        }
+        const displayMessage = ( message_obj ) => {
+            const msg_id = message_obj.id;
+            const msg_body = message_obj.message;
+            let template = $(newMessageTpl).html();
+            template = template.replace("{{id}}", msg_id);
+            template = template.replace("{{body}}", msg_body);
+            template = $(template);
+            if ( message_obj.sender_id == @ViewBag.currentUser.id ) {
+                template.find('.__chat__').addClass('from__chat');
+            } else {
+                template.find('.__chat__').addClass('receive__chat');
+            }
+            if ( message_obj.status == 1 ) {
+                template.find('.delivery-status').show();
+            }
+            $('.chat__main').append(template);
+            scrollChatToBottom(750)
+        }
+
+        const scrollChatToBottom = (animationTime) => {
+            $(".chat__main").stop().animate({ scrollTop: $(".chat__main")[0].scrollHeight }, animationTime);
+        }
+
+        // get chat data
+        const getChat = (contact_id) => {
+            console.log('currentContact', currentContact)
+            $.get("/contact/conversations/" + contact_id )
+                .done((resp) => {
+                    $('.chat__main').empty();
+                    let chat_data = resp.data || [];
+                    loadChat(chat_data);
+                    scrollChatToBottom(0)
+                });
+        }
+
+        //load chat data into view
+        const loadChat = (chat_data) => {
+            chat_data.forEach((data) => {
+                displayMessage(data);
+            });
+
+            $('.chat__body').show();
+            $('.__no__chat__').hide();
+        }
+        // select contact to chat with
+        $('.user__item').click( function(e) {
+            e.preventDefault();
+
+            if (!currentContact) {
+                $("#themes").removeClass("invisible").addClass("visible")
+            }
+
+            currentContact = {
+                id: $(this).data('contact-id'),
+                name: $(this).data('contact-name'),
+            };
+
+
+            if ( conversationChannelName ) {
+                pusher.unsubscribe( conversationChannelName );
+            }
+            conversationChannelName = getConvoChannel( (@ViewBag.currentUser.id * 1) ,  (currentContact.id * 1) );
+            currentconversationChannel = pusher.subscribe(conversationChannelName);
+            bind_client_events();
+
+            $('#contacts').find('li').removeClass('active');
+            $('#contacts .contact-' + currentContact.id).find('li').addClass('active');
+            getChat(currentContact.id);
+        });
+        const getConvoChannel = (user_id, contact_id) => {
+            if ( user_id > contact_id ) {
+                return 'private-chat-' + contact_id + '-' + user_id;
+            }
+            return 'private-chat-' + user_id + '-' + contact_id;
+        }
+        //User is typing
+        var isTypingCallback = throttle(() => {
+            currentconversationChannel.trigger("client-is-typing", {
+                user_id: @ViewBag.currentUser.id,
+                contact_id: currentContact.id,
+            });
+        }, 1000);
+
+
+        const sendMessage = () => {
+            const msg = $('#msg_box').val()
+            $('#msg_box').val('')
+            if (msg.trim().length == 0) return;
+            $.post("/send_message", {
+                message: msg,
+                contact: currentContact.id,
+                socket_id: socketId,
+            }).done((data) => {
+                displayMessage(data);
+                scrollChatToBottom(750)
+            });
+
+        }
+        $('#themes').click((e) => {
+            const themeClass = e.target.classList[0]
+            if (themeClass.toLowerCase().indexOf("theme") == -1)
+                return;
+            const chatMainNode = $('.chat__main')
+            const classList = Array.from(chatMainNode[0].classList)
+                .filter(className => className.toLowerCase().indexOf("theme") > -1)
+                .join(" ")
+
+            chatMainNode.removeClass(classList)
+            chatMainNode.addClass(themeClass)
+
+        });
+
+        $('#msg_box').on('keydown', (e) => {
+            if (e.which == 13) {
+                sendMessage()
+            }
+        });
+
+        $('#msg_box').on('keyup', (key) => {
+            isTypingCallback(key)
+        });
+        ///////////////////Sending Messages/////////////////////
+        $('#sendMessage').click(sendMessage);
+
+
+        const bind_client_events = () => {
+            currentconversationChannel.bind("client-is-typing", (data) => {
+                if ( data.user_id == currentContact.id && data.contact_id == @ViewBag.currentUser.id  ) {
+                    $('#typerDisplay').text( currentContact.name + ' is typing...');
+
+                    $('.chat__typing').fadeIn(100, function() {
+                        $('.chat__type__body').addClass('typing_display__open');
+                    }).delay(1000).fadeOut(300, function(){
+                        $('.chat__type__body').removeClass('typing_display__open');
+                    });
+                }
+            });
+            currentconversationChannel.bind("new_message", function(msg) {
+                    if ( msg.receiver_id == @ViewBag.currentUser.id ) {
+                    displayMessage(msg);
+                    }
+                    $.post("/message_delivered/" + msg.id, {
+                    socket_id: socketId,
+                    });
+            });
+            currentconversationChannel.bind("message_delivered", function(msg) {
+                $('#msg-' + msg.id).find('.delivery-status').show();
+            });
+        }
+
+    </script>
+    <style>
+        html, body {
+            margin: 0;
+            height: 100%;
+            background: linear-gradient(to top, #cc5333, #23074d); /* W3C, IE 10+/ Edge, Firefox 16+, Chrome 26+, Opera 12+, Safari 7+ */
+        }
+
+        .defaultTheme {
+            background: #bbb
+        }
+
+        .theme1 {
+            background: linear-gradient(to top, #243B55, #141E30);
+        }
+
+        .theme2 {
+            background: linear-gradient(to top, #8a2387, #e94057, #f27121);
+        }
+
+        .theme3 {
+            background: linear-gradient(to top, #c31432, #240b36);
+        }
+
+        .theme4 {
+            background-image: url("https://media.giphy.com/media/U3qYN8S0j3bpK/giphy.gif");
+            background-position: left;
+            background-repeat: inherit;
+            background-size: cover;
+        }
+
+        .theme5 {
+            background-image: url("https://media0.giphy.com/media/knBA26sv2ueXK/giphy.gif");
+            background-position: left;
+            background-repeat: inherit;
+            background-size: cover;
+        }
+
+        .themeEpic {
+            background-image: url("https://cdn.discordapp.com/attachments/381591842120007682/671124635689025556/20180615_114219.GIF");
+            background-position: left;
+            background-repeat: inherit;
+            background-size: cover;
+        }
+
+        .themeEpic2 {
+            background-image: url("https://cdn.discordapp.com/attachments/381591842120007682/671124846687551528/20180619_161236.GIF");
+            background-position: left;
+            background-repeat: inherit;
+            background-size: cover;
+        }
+
+
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        /* Track */
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+
+        /* Handle */
+        ::-webkit-scrollbar-thumb {
+            background: #888;
+        }
+
+            /* Handle on hover */
+            ::-webkit-scrollbar-thumb:hover {
+                background: #555;
+            }
+
+        .users__bar {
+            overflow-y: overlay;
+        }
+
+        .chat__main {
+            height: auto;
+            width: 100%;
+            overflow-y: auto;
+            flex: 1;
+            overflow-x: hidden;
+            margin-bottom: auto;
+            padding-bottom: 10px;
+            margin-right: auto;
+        }
+
+        #themes > span {
+            text-align: center;
+            height: 35px;
+            width: 35px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        #msg_box {
+            width: 84%;
+            margin-left: 5px;
+            margin-right: 5px
+        }
+
+        #sendMessage {
+            right: 5px;
+            top: 0px
+        }
+
+        .chat__body .chat__main .__chat__.from__chat {
+            color: #fff;
+            background-color: #2b4972e0;
+        }
+
+        .chat__body .chat__main .__chat__.receive__chat {
+            background-color: #337ab7e0;
+        }
+    </style>
+</body>
+</html>
